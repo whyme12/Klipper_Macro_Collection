@@ -1,0 +1,54 @@
+[gcode_macro PRINT_START]
+variable_start_called: 0
+variable_start_checked_error_cnt: 0
+gcode:
+gcode:
+  {% set BED_TEMP = params.BED_TEMP|default(0)|float %}
+  {% set EXTRUDER_TEMP = params.EXTRUDER_TEMP|default(0)|float %}
+
+  {% if BED_TEMP == 0 or EXTRUDER_TEMP == 0 %}
+    # they didnt read the instructions
+    CANCEL_PRINT
+  {% else %}
+    # add normal start gcode here
+
+    # set the macro to be called
+    SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_called VALUE=1
+  {% endif %}
+
+[gcode_macro PRINT_END]
+gcode:
+  # turn off heater
+  M104 S0
+  M140 S0
+
+  # clear variables
+  SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_called VALUE=0
+  SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_checked_error_cnt VALUE=0
+
+[delayed_gcode _CHECK_STARTMACRO_CALLED]
+initial_duration: 5.0
+gcode:
+  {% set start_macro_called = printer["gcode_macro PRINT_START"].start_called|int %}
+  {% set error_count = printer["gcode_macro PRINT_START"].start_checked_error_cnt|int %}
+  
+  {% if printer.print_stats.state|lower == 'printing' %}
+    # if printer is running, check is PRINT_START was calles
+    {% if start_macro_called == 0%}
+      {% if error_count < 3 %}
+        # give a few tries, increase error count
+        SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_checked_error_cnt VALUE={error_count + 1}
+      {% else %}
+        # stupid studend didnt read the instruction
+        CANCEL_PRINT
+        SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_called VALUE=0
+        SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_checked_error_cnt VALUE=0
+      {% endif %}
+    {% endif %}
+  {% else %}
+    # printer is idle, clear variables and error count
+    SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_called VALUE=0
+    SET_GCODE_VARIABLE MACRO=PRINT_START VARIABLE=start_checked_error_cnt VALUE=0
+  {% endif %}
+  # retrigger macro for next check in 5 seconds
+  UPDATE_DELAYED_GCODE ID=_CHECK_STARTMACRO_CALLED DURATION=5.0
